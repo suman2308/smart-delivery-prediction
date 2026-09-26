@@ -10,7 +10,6 @@ def _reload_with_paths(monkeypatch, tmp_path):
     import config
 
     monkeypatch.setattr(config, "DATABASE_PATH", str(tmp_path / "test.db"))
-    monkeypatch.setattr(config, "MODEL_PATH", str(tmp_path / "model.joblib"))
     monkeypatch.setattr(config, "PLOTS_DIR", str(plots))
 
     import app as flask_app

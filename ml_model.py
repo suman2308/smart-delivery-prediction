@@ -47,8 +47,11 @@ import database as db
 FEATURE_COLUMNS = ["distance", "order_time", "traffic_level", "weather"]
 TARGET = "delivery_time"
 
+MODEL_PATH = os.environ.get(
+    "DELIVERY_MODEL_PATH", os.path.join(config.BASE_DIR, "models", "delivery_regressor.joblib")
+)
 # Path for a tiny JSON file that records which model was selected.
-MODEL_META_PATH = config.MODEL_PATH + ".meta.json"
+MODEL_META_PATH = MODEL_PATH + ".meta.json"
 
 # ---------------------------------------------------------------------------
 # Pre‑processing / feature engineering
@@ -139,8 +142,8 @@ def train_and_save(test_size: float = 0.2, random_state: int = 42) -> TrainResul
         raise RuntimeError("No candidate models were successfully trained.")
 
     # Persist the best pipeline.
-    os.makedirs(os.path.dirname(config.MODEL_PATH), exist_ok=True)
-    joblib.dump(best_pipe, config.MODEL_PATH)
+    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+    joblib.dump(best_pipe, MODEL_PATH)
     # Persist metadata (selected model name).
     with open(MODEL_META_PATH, "w", encoding="utf-8") as f:
         json.dump({"best_model": best_name}, f)
@@ -155,11 +158,11 @@ def train_and_save(test_size: float = 0.2, random_state: int = 42) -> TrainResul
 # Load pipeline – Flask only calls this; it never knows which model was chosen.
 # ---------------------------------------------------------------------------
 def load_pipeline() -> Pipeline:
-    if not os.path.isfile(config.MODEL_PATH):
+    if not os.path.isfile(MODEL_PATH):
         raise FileNotFoundError(
-            f"Model not initialized at {config.MODEL_PATH}. Train model via CLI or UI."
+            f"Model not initialized at {MODEL_PATH}. Train model via CLI or UI."
         )
-    return joblib.load(config.MODEL_PATH)
+    return joblib.load(MODEL_PATH)
 
 # ---------------------------------------------------------------------------
 # Prediction helper – used by Flask routes.

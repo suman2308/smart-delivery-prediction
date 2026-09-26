@@ -372,7 +372,8 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
   width: 100%;
   padding: 0.65rem 0.9rem;
   font-family: var(--font-sans);
-  font-size: var(--text-base);
+  /* 16px floor prevents iOS Safari's focus auto-zoom on form fields */
+  font-size: max(var(--text-base), 1rem);
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);

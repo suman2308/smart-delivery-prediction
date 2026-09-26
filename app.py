@@ -251,30 +251,10 @@ _dtdc_predictor = DTDCPredictor()
 
 
 def ensure_app_ready():
+    """One-time startup prep: dirs, schema, plots dir. The production DTDC
+    model ships committed, so no training/bootstrap is needed at startup."""
     os.makedirs(config.PLOTS_DIR, exist_ok=True)
-    os.makedirs(os.path.dirname(config.MODEL_PATH), exist_ok=True)
     db.init_db()
-    _bootstrap_if_needed()
-
-
-def _bootstrap_if_needed() -> None:
-    """Startup bootstrap for fresh deployments."""
-    bootstrap_enabled = os.environ.get("BOOTSTRAP_ON_START", "1") == "1"
-    if not bootstrap_enabled or os.path.isfile(config.MODEL_PATH):
-        return
-
-    import ml_model
-    import seed_data
-
-    orders_count = db.count_orders()
-    if orders_count < 10:
-        seed_count = int(os.environ.get("BOOTSTRAP_SEED_COUNT", "300"))
-        seed_data.seed(count=seed_count, seed=42)
-
-    try:
-        ml_model.train_and_save()
-    except ValueError:
-        return
 
 
 @app.route("/")
@@ -656,6 +636,28 @@ def _generate_tracking_id() -> str:
         tid = f"SCP-{secrets.token_hex(4).upper()}"
         if db.get_prediction_by_tracking_id(tid) is None:
             return tid
+
+
+def _log_prediction(kwargs: dict, result, user_id: int | None) -> str:
+    """Persist a prediction to the audit table and return its tracking ID.
+    Shared by the web form and the JSON API (single source of truth)."""
+    tracking_id = _generate_tracking_id()
+    db.insert_dtdc_prediction(
+        origin=kwargs["origin"],
+        destination=kwargs["destination"],
+        booking_weekday=kwargs["booking_weekday"],
+        mode=kwargs["mode"],
+        nature_of_consignment=kwargs["nature_of_consignment"],
+        total_pieces=kwargs["total_pieces"],
+        actual_weight=kwargs["actual_weight"],
+        volumetric_weight=kwargs["volumetric_weight"],
+        chargeable_weight=kwargs["chargeable_weight"],
+        predicted_days=result.predicted_days,
+        model_version=result.model_version,
+        tracking_id=tracking_id,
+        user_id=user_id,
+    )
+    return tracking_id
 
 
 def _recent_tracked():
@@ -1102,24 +1104,7 @@ def predict_form():
             if not allowed:
                 return _quota_error_template(source)
 
-        # Log prediction to audit table (tracking ID makes it look-up-able;
-        # user_id links it to the account for personal history).
-        tracking_id = _generate_tracking_id()
-        db.insert_dtdc_prediction(
-            origin=kwargs["origin"],
-            destination=kwargs["destination"],
-            booking_weekday=kwargs["booking_weekday"],
-            mode=kwargs["mode"],
-            nature_of_consignment=kwargs["nature_of_consignment"],
-            total_pieces=kwargs["total_pieces"],
-            actual_weight=kwargs["actual_weight"],
-            volumetric_weight=kwargs["volumetric_weight"],
-            chargeable_weight=kwargs["chargeable_weight"],
-            predicted_days=result.predicted_days,
-            model_version=result.model_version,
-            tracking_id=tracking_id,
-            user_id=user["id"] if user else None,
-        )
+        tracking_id = _log_prediction(kwargs, result, user["id"] if user else None)
 
         # Load model metadata for result template context
         meta = _dtdc_predictor.meta
@@ -1215,23 +1200,7 @@ def predict_api():
     try:
         result = _dtdc_predictor.predict(**kwargs)
 
-        # Log prediction to audit table (tracking ID + owning account)
-        tracking_id = _generate_tracking_id()
-        db.insert_dtdc_prediction(
-            origin=kwargs["origin"],
-            destination=kwargs["destination"],
-            booking_weekday=kwargs["booking_weekday"],
-            mode=kwargs["mode"],
-            nature_of_consignment=kwargs["nature_of_consignment"],
-            total_pieces=kwargs["total_pieces"],
-            actual_weight=kwargs["actual_weight"],
-            volumetric_weight=kwargs["volumetric_weight"],
-            chargeable_weight=kwargs["chargeable_weight"],
-            predicted_days=result.predicted_days,
-            model_version=result.model_version,
-            tracking_id=tracking_id,
-            user_id=api_user["id"],
-        )
+        tracking_id = _log_prediction(kwargs, result, api_user["id"])
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except (FileNotFoundError, RuntimeError) as exc:
